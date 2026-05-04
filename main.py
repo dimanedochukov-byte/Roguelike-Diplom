@@ -400,7 +400,7 @@ class Game:
                     # Вхід у портал
                     portal_hits = pygame.sprite.spritecollide(self.player, self.portals, False)
                     if portal_hits:
-                        self.score += 100 # Бонусні бали за проходження рівня
+                        self.score += 25 # Бонусні бали за проходження рівня
                         self.new(next_level=True) # Перехід на наступний рівень
 
     def update(self):
@@ -460,8 +460,8 @@ class Game:
                     self.last_mob_pos = (mob.rect.centerx, mob.rect.centery) # Збереження місця смерті
                     mob.kill() # Видалення об'єкта
                     
-                    # Спавн монетки з імовірністю 30%
-                    if random.random() < 0.3:
+                    # Спавн монетки з імовірністю 15%
+                    if random.random() < 0.15:
                         coin = Coin(self, mob.rect.centerx, mob.rect.centery)
                         self.all_sprites.add(coin)
                         self.coins.add(coin)
