@@ -26,15 +26,20 @@ class Camera:
         return entity.rect.move(self.camera.topleft)
 
     def update(self, target):
-        # Обчислення позиції камери (центрування рівно на гравці)
-        target_x = -target.pos.x + int(WIDTH / 2)
-        target_y = -target.pos.y + int(HEIGHT / 2)
+        # Отримання реальних розмірів вікна
+        win_w, win_h = pygame.display.get_surface().get_size()
         
-        # Плавне слідування камери за гравцем (на 10% ближче кожен кадр) замість жорсткого прилипання
+        # Розрахунок віртуальної ширини (збереження висоти 600, адаптація ширини під формат екрана)
+        virt_h = 600
+        virt_w = int(virt_h * (win_w / win_h))
+        
+        # Центрування камери по віртуальному екрану
+        target_x = -target.pos.x + int(virt_w / 2)
+        target_y = -target.pos.y + int(virt_h / 2)
+        
         self.x += (target_x - self.x) * 0.1
         self.y += (target_y - self.y) * 0.1
         
-        # Передача округлених цілих чисел в рамку (пікселі не можуть бути дробовими)
         self.camera.x = int(self.x)
         self.camera.y = int(self.y)
 
@@ -42,8 +47,9 @@ class Game:
     # Головна програма. Створює вікно, запускає меню і керує всім ігровим процесом.
     def __init__(self):
         pygame.init() # Запуск рушія
+        pygame.mixer.init() # Ініціалізація звукового модуля
         self.font = pygame.font.SysFont("Arial", 28) # Завантаження звичайного шрифту Arial
-        self.screen = pygame.display.set_mode((WIDTH, HEIGHT)) # Створення вікна гри
+        self.screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.RESIZABLE) # можна розтягувати вікно
         pygame.display.set_caption(TITLE) # Задання назви вікна
         self.clock = pygame.time.Clock() # Таймер для контролю кадрів за секунду (FPS)
         self.running = True # Прапорець роботи гри (False - гра закривається)
@@ -70,6 +76,27 @@ class Game:
 
         # Вирізання підлоги
         self.floor_img = get_tile(4, 2)
+    
+
+        # --- СТВОРЕННЯ ДЕКАЛЕЙ (ТРІЩИНИ ТА БРУД) БЕЗ НОВИХ ФАЙЛІВ ---
+        # Створення копії базового тайлу для малювання тріщини
+        crack_img = self.floor_img.copy()
+        pygame.draw.line(crack_img, (25, 25, 30), (10, 10), (25, 25), 2)
+        pygame.draw.line(crack_img, (25, 25, 30), (25, 25), (30, 15), 2)
+        
+        # Створення копії базового тайлу для малювання моху/бруду
+        moss_img = self.floor_img.copy()
+        pygame.draw.circle(moss_img, (40, 50, 40), (20, 30), 6)
+        pygame.draw.circle(moss_img, (35, 45, 35), (28, 25), 4)
+
+        # Створення копії для імітації дрібного каміння або гільз
+        debris_img = self.floor_img.copy()
+        pygame.draw.rect(debris_img, (150, 150, 100), (15, 15, 3, 3))
+        pygame.draw.rect(debris_img, (100, 100, 100), (25, 20, 2, 2))
+        
+        # Формування списку варіацій. Базовий тайл додається багато разів 
+        # для того, щоб сміття на карті зустрічалось рідко (приблизно 10% шансу).
+        self.floor_variations = [self.floor_img] * 25 + [crack_img, moss_img, debris_img]
 
         # Вирізання фрагментів стін для системи автоматичного підбору кутів
         self.b_top = get_tile(1, 2)      # Рамка знизу (для стіни НАД підлогою)
@@ -85,6 +112,25 @@ class Game:
         self.bg_color = self.b_top.get_at((0, 0))
         self.void_img = pygame.Surface((TILESIZE, TILESIZE))
         self.void_img.fill(self.bg_color) 
+
+        # --- ЗАВАНТАЖЕННЯ ЗВУКІВ ---
+        # Файли повинні знаходитись у папці assets
+        self.snd_shoot = pygame.mixer.Sound(os.path.join(assets_folder, 'shoot.wav'))
+        self.snd_hit = pygame.mixer.Sound(os.path.join(assets_folder, 'hit.wav'))
+        # Додаткові звукові ефекти
+        self.snd_pain = pygame.mixer.Sound(os.path.join(assets_folder, 'pain.wav'))
+        self.snd_coin = pygame.mixer.Sound(os.path.join(assets_folder, 'coin.wav'))
+        self.snd_heal = pygame.mixer.Sound(os.path.join(assets_folder, 'heal.wav'))
+        self.snd_portal = pygame.mixer.Sound(os.path.join(assets_folder, 'portal.wav'))
+        self.snd_reload = pygame.mixer.Sound(os.path.join(assets_folder, 'reload.wav'))
+        # Налаштування гучності (від 0.0 до 1.0)
+        self.snd_shoot.set_volume(0.3)
+        self.snd_hit.set_volume(0.5)
+        self.snd_pain.set_volume(0.6)
+        self.snd_coin.set_volume(0.4)
+        self.snd_heal.set_volume(0.6)
+        self.snd_portal.set_volume(0.7)
+        self.snd_reload.set_volume(0.5)
         
         def load_anim(filename):
             # Функція для розрізання довгої картинки анімації на 4 окремі кадри
@@ -213,63 +259,52 @@ class Game:
             self.player_anim['idle_right'].append(id_r)
 
     def draw_hud(self):
-        # Відображення інтерфейсу на екрані
+        # Отримання актуальних розмірів адаптивного віртуального екрана
+        cw = self.screen.get_width()
+        ch = self.screen.get_height()
+        
         health_bar_width = 200
         health_bar_height = 20
         
-        # Відображення червоного фону для шкали здоров'я
         pygame.draw.rect(self.screen, RED, (10, 10, health_bar_width, health_bar_height))
-        hp = max(self.player.health, 0) # Блокування візуального падіння ХП нижче нуля
-        
-        # Обчислення довжини зеленої смужки залежно від поточного ХП
+        hp = max(self.player.health, 0) 
         current_health_width = (hp / PLAYER_HEALTH) * health_bar_width
         
-        # Відображення зеленої смужки
         if current_health_width > 0:
             pygame.draw.rect(self.screen, GREEN, (10, 10, current_health_width, health_bar_height))
             
-        # Відображення білої рамки навколо ХП
         pygame.draw.rect(self.screen, WHITE, (10, 10, health_bar_width, health_bar_height), 2)
         
-        # Вивід тексту рівня
-        level_text = self.font.render(f"Рівень: {self.current_level}", True, WHITE)
+        level_text = self.font.render(f"Рівень: {self.current_level} | Залишилось ворогів: {len(self.mobs)}", True, WHITE)
         self.screen.blit(level_text, (health_bar_width + 30, 8))
 
-        # Вивід тексту монет
+        # Відступ від правого краю адаптивного екрана (запобігання накладанню)
         score_text = self.font.render(f"Монети: {self.score}", True, (255, 215, 0)) 
-        self.screen.blit(score_text, (health_bar_width + 160, 8))
+        self.screen.blit(score_text, (cw - 180, 8))
 
         wpn = WEAPONS[self.player.weapon]
-        
-        # Словник для локалізації назв зброї на екрані
-        weapon_names_ua = {
-            'pistol': 'ПІСТОЛЕТ',
-            'shotgun': 'ДРОБОВИК',
-            'machine_gun': 'АВТОМАТ'
-        }
+        weapon_names_ua = {'pistol': 'ПІСТОЛЕТ', 'shotgun': 'ДРОБОВИК', 'machine_gun': 'АВТОМАТ'}
         weapon_display = weapon_names_ua.get(self.player.weapon, self.player.weapon.upper())
 
-        # Перевірка стану перезарядки для зміни кольору тексту
         if self.player.reloading:
             ammo_text = "ПЕРЕЗАРЯДЖАННЯ..."
             text_color = RED
         else:
-            # Відображення залишку патронів
             ammo_text = f"{self.player.ammo} / {wpn['mag']}"
             text_color = WHITE
             
         weapon_text = self.font.render(f"Зброя: {weapon_display} | Набої: {ammo_text}", True, text_color)
         self.screen.blit(weapon_text, (10, 40))
         
-        # Спливаючі підказки (при знаходженні поруч із предметами)
+        # Спливаючі підказки строго по центру віртуального екрана
         portal_hits = pygame.sprite.spritecollide(self.player, self.portals, False)
-        if portal_hits: # Контакт із порталом
+        if portal_hits: 
             prompt = self.font.render("Натисни 'E', щоб увійти в портал", True, WHITE)
-            self.screen.blit(prompt, (WIDTH//2 - prompt.get_width()//2, HEIGHT//2 + 50))
-            return # Вихід з функції для запобігання накладання текстів
+            self.screen.blit(prompt, (cw//2 - prompt.get_width()//2, ch//2 + 50))
+            return 
             
         kit_hits = pygame.sprite.spritecollide(self.player, self.health_kits, False)
-        if kit_hits: # Контакт з аптечкою
+        if kit_hits: 
             kit = kit_hits[0]
             if self.player.health >= PLAYER_HEALTH:
                 prompt = self.font.render("Здоров'я повне!", True, GREY)
@@ -277,7 +312,7 @@ class Game:
                 prompt = self.font.render(f"Не вистачає монет (потрібно {kit.cost})", True, RED)
             else:
                 prompt = self.font.render(f"Натисни 'E' - Купити аптечку (-{kit.cost} монет)", True, GREEN)
-            self.screen.blit(prompt, (WIDTH//2 - prompt.get_width()//2, HEIGHT//2 + 50))
+            self.screen.blit(prompt, (cw//2 - prompt.get_width()//2, ch//2 + 50))
 
     def new(self, next_level=False): 
         # Запуск рівня (при старті гри або проходженні порталу)
@@ -385,6 +420,8 @@ class Game:
                     if self.player.ammo < WEAPONS[self.player.weapon]['mag']:
                         self.player.reloading = True
                         self.player.reload_start_time = pygame.time.get_ticks()
+                        # Відтворення звуку початку ручного перезаряджання
+                        self.snd_reload.play()
                         
                 # Клавіша взаємодії (E)
                 if event.key == pygame.K_e:
@@ -392,6 +429,8 @@ class Game:
                     kit_hits = pygame.sprite.spritecollide(self.player, self.health_kits, False)
                     for kit in kit_hits:
                         if self.score >= kit.cost and self.player.health < PLAYER_HEALTH:
+                            # Відтворення звуку лікування
+                            self.snd_heal.play()
                             self.score -= kit.cost
                             self.player.health = min(self.player.health + kit.heal_amount, PLAYER_HEALTH)
                             kit.kill() # Видалення аптечки з карти
@@ -400,6 +439,8 @@ class Game:
                     # Вхід у портал
                     portal_hits = pygame.sprite.spritecollide(self.player, self.portals, False)
                     if portal_hits:
+                        # Відтворення звуку переходу на наступний рівень
+                        self.snd_portal.play()
                         self.score += 25 # Бонусні бали за проходження рівня
                         self.new(next_level=True) # Перехід на наступний рівень
 
@@ -424,6 +465,8 @@ class Game:
         hits = pygame.sprite.groupcollide(self.mobs, self.bullets, False, True)
         for mob, bullets_hit in hits.items():
             if mob.state == 'ACTIVE':
+                # Відтворення звуку влучання у ворога
+                self.snd_hit.play()
                 # Сумування урону від всіх влучених куль (важливо для дробовика)
                 total_damage = sum([b.damage for b in bullets_hit])
                 mob.health -= total_damage
@@ -468,6 +511,8 @@ class Game:
                         
                     # Спавн порталу на місці останнього вбитого моба
                     if len(self.mobs) == 0 and len(self.portals) == 0:
+                        # Відтворення звуку появи порталу на рівні
+                        self.snd_portal.play()
                         portal = Portal(self, self.last_mob_pos[0], self.last_mob_pos[1])
                         self.all_sprites.add(portal)
                         self.portals.add(portal)
@@ -475,6 +520,8 @@ class Game:
         # 2. Влучання ворожих куль у гравця
         proj_hits = pygame.sprite.spritecollide(self.player, self.mob_projectiles, True)
         for hit in proj_hits:
+            # Відтворення звуку отримання шкоди від снаряда (стріли)
+            self.snd_pain.play()
             self.player.health -= 10 # Втрата ХП
             if self.player.health <= 0:
                 self.show_go_screen() # Перехід на екран поразки
@@ -489,6 +536,8 @@ class Game:
                 if current_time - self.damage_timer > 1000:
                     self.damage_timer = current_time
                     self.player.health -= MOB_DAMAGE * active_hits[0].damage_mult
+                    # Відтворення звуку отримання шкоди головним героєм
+                    self.snd_pain.play()
                     
                     # Відкидання гравця від удару моба
                     dir_to_mob = vec(self.player.rect.center) - vec(active_hits[0].rect.center)
@@ -515,9 +564,23 @@ class Game:
         # 4. Збір монет (контакт гравця з монетою)
         coin_hits = pygame.sprite.spritecollide(self.player, self.coins, True)
         for hit in coin_hits:
+            # Відтворення звуку підбору ігрової валюти
+            self.snd_coin.play()
             self.score += 10 # Збільшення рахунку
 
     def draw(self):
+        # --- СИСТЕМА МАСШТАБУВАННЯ (Enter the Gungeon style) ---
+        win_w, win_h = self.screen.get_size()
+        virt_h = 600
+        virt_w = int(virt_h * (win_w / win_h))
+        
+        # Створення віртуального екрана
+        virt_screen = pygame.Surface((virt_w, virt_h))
+        
+        # Тимчасова підміна головного екрана на віртуальний для малювання всіх об'єктів
+        real_screen = self.screen
+        self.screen = virt_screen
+        
         self.screen.fill(self.bg_color) # Очищення фону
         
         # Відображення підлоги зі зміщенням камери
@@ -530,8 +593,13 @@ class Game:
                 if tile == '0': # Якщо це підлога
                     tile_rect = pygame.Rect(col * TILESIZE, row * TILESIZE, TILESIZE, TILESIZE)
                     target = CameraTarget(tile_rect)
-                    # Малювання плитки підлоги
-                    self.screen.blit(self.floor_img, self.camera.apply(target))
+                    
+                    # Використання хеш-функції координат для створення ідеального 
+                    # псевдовипадкового розподілу без візуальних діагоналей (патернів).
+                    idx = hash((col, row)) % len(self.floor_variations)
+                    current_floor = self.floor_variations[idx]
+                    
+                    self.screen.blit(current_floor, self.camera.apply(target))
 
         # Малювання всіх об'єктів (моби, гравець, кулі)
         for sprite in self.all_sprites:
@@ -548,60 +616,76 @@ class Game:
 
                 pygame.draw.rect(self.screen, RED, (mob_screen_rect.left, mob_screen_rect.top - 10, bar_width, bar_height))
                 pygame.draw.rect(self.screen, GREEN, (mob_screen_rect.left, mob_screen_rect.top - 10, bar_width * hp_ratio, bar_height))
-
-        self.draw_hud() # Відображення інтерфейсу
-        self.screen.blit(self.crosshair.image, self.crosshair.rect) # Відображення прицілу
+        
+        self.draw_hud() # Відображення інтерфейсу на віртуальному екрані
+        self.screen.blit(self.crosshair.image, self.crosshair.rect) 
+        
+        # Повернення реального екрана для фінального рендеру
+        self.screen = real_screen
+        
+        # Масштабування віртуального екрана на весь монітор (без чорних смуг та зміни огляду)
+        scaled_surface = pygame.transform.scale(virt_screen, (win_w, win_h))
+        self.screen.blit(scaled_surface, (0, 0))
+        
         pygame.display.flip() # Вивід кадру на екран
 
     def show_start_screen(self):
-        # Головне меню
-        self.screen.fill((20, 20, 25))
-        
-        title_font = pygame.font.SysFont("Arial", 64, bold=True)
-        title_text = title_font.render("ROGUELIKE DIPLOM", True, (255, 215, 0))
-        prompt_text = self.font.render("Натисни ПРОБІЛ, щоб почати", True, WHITE)
-        ctrl_text = self.ui_font.render("WASD - Рух | Миша - Приціл | 1, 2, 3 - Зміна зброї | E - Дія", True, (150, 150, 150))
-        
-        self.screen.blit(title_text, (WIDTH//2 - title_text.get_width()//2, HEIGHT//2 - 100))
-        self.screen.blit(prompt_text, (WIDTH//2 - prompt_text.get_width()//2, HEIGHT//2 + 20))
-        self.screen.blit(ctrl_text, (WIDTH//2 - ctrl_text.get_width()//2, HEIGHT - 50))
-        
-        pygame.display.flip()
-        self.wait_for_key() # Очікування натискання клавіші
-
-    def show_go_screen(self):
-        # Екран завершення гри (ВИТРАЧЕНО)
-        pygame.mouse.set_visible(True) 
-        self.screen.fill((20, 20, 25)) 
-        
-        title_font = pygame.font.SysFont("Arial", 64, bold=True)
-        text1 = title_font.render("ВИТРАЧЕНО", True, RED)
-        
-        # Відображення результатів (монети і рівень)
-        score_text = self.font.render(f"Досягнуто рівень: {self.current_level}  |  Зібрано монет: {self.score}", True, (255, 215, 0))
-        text2 = self.font.render("Натисни ПРОБІЛ для рестарту", True, WHITE)
-        
-        self.screen.blit(text1, (WIDTH//2 - text1.get_width()//2, HEIGHT//2 - 100))
-        self.screen.blit(score_text, (WIDTH//2 - score_text.get_width()//2, HEIGHT//2))
-        self.screen.blit(text2, (WIDTH//2 - text2.get_width()//2, HEIGHT//2 + 80))
-        
-        pygame.display.flip()
-        self.wait_for_key()
-
-    def wait_for_key(self):
-        # Пауза до натискання Пробілу
         waiting = True
         while waiting:
             self.clock.tick(FPS)
+            current_w, current_h = self.screen.get_size() # Динамичній розмір вікна
+            
+            self.screen.fill((20, 20, 25))
+            
+            title_font = pygame.font.SysFont("Arial", 64, bold=True)
+            title_text = title_font.render("ROGUELIKE DIPLOM", True, (255, 215, 0))
+            prompt_text = self.font.render("Натисни ПРОБІЛ, щоб почати", True, WHITE)
+            ctrl_text = self.ui_font.render("WASD - Рух | Миша - Приціл | 1, 2, 3 - Зміна зброї | E - Дія", True, (150, 150, 150))
+            
+            # Текст завжди рівно по центру
+            self.screen.blit(title_text, (current_w//2 - title_text.get_width()//2, current_h//2 - 100))
+            self.screen.blit(prompt_text, (current_w//2 - prompt_text.get_width()//2, current_h//2 + 20))
+            self.screen.blit(ctrl_text, (current_w//2 - ctrl_text.get_width()//2, current_h - 50))
+            
+            pygame.display.flip()
+            
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     waiting = False
                     self.running = False
                     self.playing = False
-                if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_SPACE:
-                        waiting = False
-                        self.playing = False
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
+                    waiting = False
+                    self.playing = False
+
+    def show_go_screen(self):
+        pygame.mouse.set_visible(True) 
+        waiting = True
+        while waiting:
+            self.clock.tick(FPS)
+            current_w, current_h = self.screen.get_size()
+            
+            self.screen.fill((20, 20, 25)) 
+            
+            title_font = pygame.font.SysFont("Arial", 64, bold=True)
+            text1 = title_font.render("ВИТРАЧЕНО", True, RED)
+            score_text = self.font.render(f"Досягнуто рівень: {self.current_level}  |  Зібрано монет: {self.score}", True, (255, 215, 0))
+            text2 = self.font.render("Натисни ПРОБІЛ для рестарту", True, WHITE)
+            
+            self.screen.blit(text1, (current_w//2 - text1.get_width()//2, current_h//2 - 100))
+            self.screen.blit(score_text, (current_w//2 - score_text.get_width()//2, current_h//2))
+            self.screen.blit(text2, (current_w//2 - text2.get_width()//2, current_h//2 + 80))
+            
+            pygame.display.flip()
+            
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    waiting = False
+                    self.running = False
+                    self.playing = False
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
+                    waiting = False
+                    self.playing = False
 
     def run(self):
         # Ігровий цикл

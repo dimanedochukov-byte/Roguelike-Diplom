@@ -166,6 +166,8 @@ class Player(pygame.sprite.Sprite):
                     if self.ammo == 0: # Автоматичний початок перезарядки при порожньому магазині
                         self.reloading = True
                         self.reload_start_time = now
+                        # Відтворення звуку при порожньому магазині
+                        self.game.snd_reload.play()
 
                     # Розрахунок вектора напрямку кулі відносно камери
                     mouse_pos = pygame.mouse.get_pos()
@@ -177,6 +179,8 @@ class Player(pygame.sprite.Sprite):
                     dir_vector = target_pos - player_pos
                     
                     if dir_vector.length() > 0: 
+                        # Відтворення звуку пострілу
+                        self.game.snd_shoot.play()
                         dir_vector = dir_vector.normalize() 
                         # Генерація заданої кількості куль (використовується для дробовика)
                         for _ in range(wpn['count']):
@@ -195,6 +199,8 @@ class Player(pygame.sprite.Sprite):
             else: # Активація перезарядки при спробі стрільби без патронів
                 self.reloading = True
                 self.reload_start_time = now
+                # Відтворення звуку при спробі вистрілити без набоїв
+                self.game.snd_reload.play()
 
 class Wall(pygame.sprite.Sprite):
     """Клас стіни з підтримкою автоматичного вибору текстури (автотайлінг)"""
