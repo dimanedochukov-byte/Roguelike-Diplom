@@ -327,11 +327,15 @@ class Mob(pygame.sprite.Sprite):
         
         self.base_type = stats['type'] 
         self.speed = stats['speed']
-        self.health = stats['health']
+        # --- МАСШТАБУВАННЯ СКЛАДНОСТІ ---
+        base_hp = stats['health']
+        self.health = int(base_hp * self.game.difficulty) # Множення ХП на складність
+        
+        
         self.color = stats['color']
         
         self.size = 45 # Візуальний розмір
-        self.damage_mult = 1
+        self.damage_mult = self.game.difficulty # Множення шкоди від моба на складність
         self.last_shot = 0
 
         # --- СИСТЕМА АНІМАЦІЇ ВОРОГІВ ---

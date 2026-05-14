@@ -348,6 +348,12 @@ class Game:
             self.score = 0          
         else: 
             self.current_level += 1 
+
+            
+        # Обчислення глобального множника складності (працює і для 1-го, і для наступних рівнів).
+        # Збільшення на 10% кожні 2 рівні. Жорсткий ліміт (hard cap) на позначці 1.5.
+        steps = (self.current_level - 1) // 2
+        self.difficulty = min(1.5, 1.0 + (steps * 0.1))
         
         # Встановлення гравця у стартову кімнату
         self.player.rect.center = (start_x * TILESIZE, start_y * TILESIZE)
