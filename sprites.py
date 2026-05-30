@@ -217,7 +217,8 @@ class Wall(pygame.sprite.Sprite):
             # Перевірка наявності підлоги за відносними координатами
             nx, ny = x + dx, y + dy
             if 0 <= ny <= max_y and 0 <= nx <= max_x:
-                return game.map_data[ny][nx] == '0'
+                # ТЕПЕР СТІНА БАЧИТЬ І ПІДЛОГУ, І БОЧКУ
+                return game.map_data[ny][nx] in ['0', 'X'] 
             return False
 
         # Аналіз сусідніх клітинок для визначення типу текстури стіни
@@ -260,6 +261,21 @@ class Floor(pygame.sprite.Sprite):
         self.image.fill((40, 40, 45)) 
         pygame.draw.rect(self.image, (30, 30, 35), (0, 0, TILESIZE, TILESIZE), 1)
         self.rect = self.image.get_rect()
+        self.rect.x = x * TILESIZE
+        self.rect.y = y * TILESIZE
+
+class Obstacle(pygame.sprite.Sprite):
+    def __init__(self, game, x, y):
+        # Добавляем в группу walls, чтобы об нее бились пули, мобы и игрок
+        self.groups = game.all_sprites, game.walls
+        pygame.sprite.Sprite.__init__(self, self.groups)
+        self.game = game
+        self.image = self.game.barrel_img
+        self.rect = self.image.get_rect()
+        
+        # Координаты по ігровій сітці
+        self.x = x
+        self.y = y
         self.rect.x = x * TILESIZE
         self.rect.y = y * TILESIZE
 
@@ -331,7 +347,6 @@ class Mob(pygame.sprite.Sprite):
         base_hp = stats['health']
         self.health = int(base_hp * self.game.difficulty) # Множення ХП на складність
         
-        
         self.color = stats['color']
         
         self.size = 45 # Візуальний розмір
@@ -390,7 +405,8 @@ class Mob(pygame.sprite.Sprite):
             # Активація моба при наближенні гравця або отриманні шкоди
             if dist_to_player < SPAWN_RADIUS or self.is_hit:
                 self.state = 'ACTIVE' 
-                self.last_shot = now - 1500
+                # Віднімаємо 1000 мс. Тепер затримка буде лише ~0.5 секунди
+                self.last_shot = now - 1000
                 
         elif self.state == 'ACTIVE':
             # Оновлення кадрів анімації
@@ -444,15 +460,45 @@ class Mob(pygame.sprite.Sprite):
                 
                 # Періодична стрільба
                 if now - self.last_shot > MOB_TYPES['archer']['shoot_rate']:
-                    self.last_shot = now
-                    shoot_dir = (player_pos - self.pos).normalize() if (player_pos - self.pos).length() > 0 else vec(1, 0)
-                    proj = MobProjectile(self.game, self.rect.center, shoot_dir)
-                    self.game.all_sprites.add(proj)
-                    self.game.mob_projectiles.add(proj)
+                    # ВИПРАВЛЕНО: Перевірка прямої видимості перед пострілом
+                    if self.has_line_of_sight(player_pos):
+                        self.last_shot = now
+                        shoot_dir = (player_pos - self.pos).normalize() if (player_pos - self.pos).length() > 0 else vec(1, 0)
+                        proj = MobProjectile(self.game, self.rect.center, shoot_dir)
+                        self.game.all_sprites.add(proj)
+                        self.game.mob_projectiles.add(proj)
 
             # Виконання переміщення
             if move_dir.length() > 0:
                 self.move(move_dir)
+    
+    def has_line_of_sight(self, target_pos):
+        """Перевірка прямої видимості: пускає промінь до гравця і шукає стіни чи бочки"""
+        start = self.pos
+        target = vec(target_pos)
+        direction = target - start
+        dist = direction.length()
+        
+        if dist == 0: 
+            return True
+            
+        direction = direction.normalize()
+        step = 20  # Перевіряємо кожні 20 пікселів (половина тайлу)
+        current_dist = 0
+        
+        while current_dist < dist:
+            check_point = start + direction * current_dist
+            map_x = int(check_point.x // TILESIZE)
+            map_y = int(check_point.y // TILESIZE)
+            
+            # Перевірка, чи не потрапив промінь у стіну ('1') або бочку ('X')
+            if 0 <= map_y < len(self.game.map_data) and 0 <= map_x < len(self.game.map_data[0]):
+                if self.game.map_data[map_y][map_x] in ['1', 'X']:
+                    return False  # Перешкода знайдена, видимості немає
+            
+            current_dist += step
+            
+        return True  # Шлях чистий
 
     def move(self, direction):
         """Метод переміщення моба з обробкою зіткнень"""
@@ -475,7 +521,6 @@ class Mob(pygame.sprite.Sprite):
                 self.pos.y = self.hitbox.centery
                 
         self.rect.center = self.hitbox.center
-
 class Coin(pygame.sprite.Sprite):
     """Спрайт ігрової валюти"""
     def __init__(self, game, x, y):

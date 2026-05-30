@@ -19,7 +19,7 @@ class DungeonGenerator:
         self._rect_rooms = [] # Список для збереження меж кімнат (для запобігання накладанню)
 
     def generate(self):
-        # --- ЕТАП 1: ГЕНЕРАЦІЯ ТА РОЗМІЩЕННЯ КІМНАТ ---
+        
         
         # Визначення кількості кімнат (випадково від 8 до 12)
         num_rooms = random.randint(8, 12) 
@@ -55,7 +55,7 @@ class DungeonGenerator:
                 center_y = y + h // 2
                 self.rooms.append((center_x, center_y)) 
 
-        # --- ЕТАП 2: ПОЄДНАННЯ КІМНАТ (АЛГОРИТМ НАЙБЛИЖЧОГО СУСІДА) ---
+        #  (АЛГОРИТМ НАЙБЛИЖЧОГО СУСІДА) 
         
         if len(self.rooms) > 1:
             # Поділ кімнат на "підключені" та "непідключені"
@@ -103,6 +103,48 @@ class DungeonGenerator:
                         # Видалення стіни, якщо вона знаходиться між двома вертикальними ділянками підлоги
                         elif self.map[y][x-1] == '0' and self.map[y][x+1] == '0':
                             self.map[y][x] = '0'
+                        
+        for room in self._rect_rooms:
+            rx, ry, rw, rh = room
+            
+            # Защита от слишком маленьких комнат
+            if rw < 5 or rh < 5: 
+                continue 
+            
+            # От 5 до 8 бочек на каждую комнату
+            num_barrels = random.randint(0, 6)
+            attempts = 0
+            placed = 0
+            
+            # Запас итераций, чтобы генератор не завис, если не найдет место
+            while placed < num_barrels and attempts < 50:
+                attempts += 1
+                
+                bx = random.randint(rx, rx + rw - 1)
+                by = random.randint(ry, ry + rh - 1)
+                
+                # ОТСЕКАЕМ ЦЕНТР: бочка ставится только в пределах 2 тайлов от любой стены
+                # Если координаты попадают в "середину" комнаты - пропускаем
+                if rx + 2 <= bx <= rx + rw - 3 and ry + 2 <= by <= ry + rh - 3:
+                    continue
+                    
+                # ЗАЩИТА ПРОХОДОВ: проверяем зону 3х3 вокруг будущей бочки
+                is_near_door = False
+                for check_y in range(by - 1, by + 2):
+                    for check_x in range(bx - 1, bx + 2):
+                        if 0 <= check_x < self.width and 0 <= check_y < self.height:
+                            # Если рядом есть пол, который ВНЕ этой комнаты - это выход/коридор
+                            if self.map[check_y][check_x] in ['0', 'X']:
+                                if not (rx <= check_x < rx + rw and ry <= check_y < ry + rh):
+                                    is_near_door = True
+                
+                if is_near_door:
+                    continue # Слишком близко к двери, ищем другую точку
+                    
+                # Если все проверки пройдены и клетка пустая - ставим бочку
+                if self.map[by][bx] == '0':
+                    self.map[by][bx] = 'X'
+                    placed += 1
 
         # Отримання стартових координат для гравця (центр першої кімнати)
         start_x, start_y = self.rooms[0]

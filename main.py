@@ -4,7 +4,7 @@ import random      # Бібліотека для випадкових чисел
 import os          # Бібліотека для роботи з файлами (для пошуку папки з картинками)
 from settings import *  # Завантаження констант (кольори, швидкість, розміри)
 from map_gen import DungeonGenerator # Завантаження генератора кімнат і коридорів
-from sprites import Player, Wall, Bullet, Floor, Mob, Coin, Portal, Crosshair # Завантаження всіх ігрових об'єктів
+from sprites import Player, Wall, Bullet, Floor, Mob, Coin, Portal, Crosshair, Obstacle # Завантаження всіх ігрових об'єктів
 
 # Створення скороченої назви для векторів. Вектор - це математична "стрілочка", 
 # яка має напрямок і довжину. Використовується для руху і камери.
@@ -60,7 +60,7 @@ class Game:
         self.ui_font = pygame.font.SysFont(None, 30) # Додатковий шрифт
         
         self.current_level = 1 # Поточний поверх підземелля
-        
+        self.show_minimap = False # Прапорець для виклику мінікарти
         self.load_data() # Завантаження всіх картинок в пам'ять
     
     def load_data(self):
@@ -112,6 +112,10 @@ class Game:
         self.bg_color = self.b_top.get_at((0, 0))
         self.void_img = pygame.Surface((TILESIZE, TILESIZE))
         self.void_img.fill(self.bg_color) 
+
+        # --- ДОДАВАННЯ БОЧОК ---
+        raw_barrel = pygame.image.load(os.path.join(assets_folder, 'Barrel Sprite.png')).convert_alpha()
+        self.barrel_img = pygame.transform.scale(raw_barrel, (TILESIZE, TILESIZE))
 
         # --- ЗАВАНТАЖЕННЯ ЗВУКІВ ---
         # Файли повинні знаходитись у папці assets
@@ -332,7 +336,8 @@ class Game:
         generator = DungeonGenerator(80, 80)
         generated_map, start_x, start_y = generator.generate()
         self.map_data = generated_map
-        
+        # ЗБЕРІГАЄМО КІМНАТИ ДЛЯ МІНІКАРТИ
+        self.map_rooms = generator._rect_rooms
         # Перевірка згенерованої карти: розстановка стін на місцях з '1'
         for row, tiles in enumerate(generated_map):
             for col, tile in enumerate(tiles):
@@ -340,6 +345,18 @@ class Game:
                     wall = Wall(self, col, row)
                     self.all_sprites.add(wall)
                     self.walls.add(wall)
+                elif tile == 'X':
+                    # 1. Тимчасово кажемо грі, що тут звичайна підлога
+                    self.map_data[row][col] = '0'
+                    
+                    # 2. Тепер гра 100% малює сірий квадрат підлоги
+                    Floor(self, col, row)
+                    
+                    # 3. Повертаємо перешкоду назад, щоб моби її обходили
+                    self.map_data[row][col] = 'X'
+                    
+                    # 4. Ставимо саму бочку зверху
+                    Obstacle(self, col, row)
 
         # Скидання прогресу при новій грі або його збереження при переході в портал
         if not next_level:
@@ -399,6 +416,12 @@ class Game:
                 sys.exit()
                 
             if event.type == pygame.KEYDOWN:
+
+                # Відкриття/Закриття мінікарти на TAB
+                if event.key == pygame.K_TAB:
+                    self.show_minimap = not self.show_minimap
+
+
                 # Обробка натискання Escape
                 if event.key == pygame.K_ESCAPE:
                     self.playing = False
@@ -632,8 +655,66 @@ class Game:
         # Масштабування віртуального екрана на весь монітор (без чорних смуг та зміни огляду)
         scaled_surface = pygame.transform.scale(virt_screen, (win_w, win_h))
         self.screen.blit(scaled_surface, (0, 0))
-        
+        if getattr(self, 'show_minimap', False):
+            self.draw_minimap()
         pygame.display.flip() # Вивід кадру на екран
+
+    def draw_minimap(self):
+        
+        # Темний напівпрозорий фон (ефект паузи)
+        overlay = pygame.Surface((self.screen.get_width(), self.screen.get_height()), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 210))
+        self.screen.blit(overlay, (0, 0))
+
+        # Розмір однієї клітинки на мінікарти (6 пікселів)
+        cell_size = 6
+        map_w = len(self.map_data[0]) * cell_size
+        map_h = len(self.map_data) * cell_size
+        
+        # Центрування карти на екрані
+        offset_x = (self.screen.get_width() - map_w) // 2
+        offset_y = (self.screen.get_height() - map_h) // 2
+
+        # 1. Малюємо коридори (всі ділянки підлоги)
+        for y, row in enumerate(self.map_data):
+            for x, tile in enumerate(row):
+                if tile in ['0', 'X']:
+                    rect = (offset_x + x * cell_size, offset_y + y * cell_size, cell_size, cell_size)
+                    pygame.draw.rect(self.screen, (80, 80, 90), rect)
+
+        # 2. Визначаємо координати гравця в тайлах
+        player_x = int(self.player.pos.x // TILESIZE)
+        player_y = int(self.player.pos.y // TILESIZE)
+
+        # 3. Малюємо кімнати з різними кольорами
+        for room in self.map_rooms:
+            rx, ry, rw, rh = room
+            room_rect = (offset_x + rx * cell_size, offset_y + ry * cell_size, rw * cell_size, rh * cell_size)
+            
+            is_player_here = (rx <= player_x < rx + rw) and (ry <= player_y < ry + rh)
+            
+            has_enemies = False
+            for mob in self.mobs:
+                mx = int(mob.pos.x // TILESIZE)
+                my = int(mob.pos.y // TILESIZE)
+                if (rx <= mx < rx + rw) and (ry <= my < ry + rh):
+                    has_enemies = True
+                    break
+            
+            # Вибір кольору:
+            if is_player_here:
+                color = (80, 180, 80)    # Зелена - ти зараз тут
+            elif has_enemies:
+                color = (180, 60, 60)    # Червона - не зачищено (є вороги)
+            else:
+                color = (120, 120, 130)  # Сіра - зачищена кімната
+
+            pygame.draw.rect(self.screen, color, room_rect)
+            pygame.draw.rect(self.screen, (200, 200, 200), room_rect, 1) # Рамка кімнати
+
+        # 4. Малюємо гравця (яскрава салатова крапка)
+        p_rect = (offset_x + player_x * cell_size, offset_y + player_y * cell_size, cell_size, cell_size)
+        pygame.draw.rect(self.screen, (0, 255, 0), p_rect)    
 
     def show_start_screen(self):
         waiting = True
@@ -646,7 +727,7 @@ class Game:
             title_font = pygame.font.SysFont("Arial", 64, bold=True)
             title_text = title_font.render("ROGUELIKE DIPLOM", True, (255, 215, 0))
             prompt_text = self.font.render("Натисни ПРОБІЛ, щоб почати", True, WHITE)
-            ctrl_text = self.ui_font.render("WASD - Рух | Миша - Приціл | 1, 2, 3 - Зміна зброї | E - Дія", True, (150, 150, 150))
+            ctrl_text = self.ui_font.render("WASD - Рух | Миша - Приціл | 1, 2, 3 - Зброя | E - Дія | TAB - Карта", True, (150, 150, 150))
             
             # Текст завжди рівно по центру
             self.screen.blit(title_text, (current_w//2 - title_text.get_width()//2, current_h//2 - 100))
@@ -705,7 +786,12 @@ class Game:
                 self.dt = 0.05
                 
             self.events()    # Обробка натискань кнопок
-            self.update()    # Оновлення позицій
+            # --- ПАУЗА ДЛЯ МІНІКАРТИ ---
+            # Оновлюємо фізику (рух, стрільбу), тільки якщо карта ЗАКРИТА
+            if not self.show_minimap:
+                self.update()    
+                
+            self.draw()      # Відображення кадру
             self.draw()      # Відображення кадру
 
 class HealthKit(pygame.sprite.Sprite):
